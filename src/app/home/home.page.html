@@ -1,0 +1,63 @@
+<ion-content fullscreen class="player-container">
+
+  <canvas #visualizerCanvas class="visualizer-canvas"></canvas>
+
+  <div class="opa">
+    <img [src]="currentSong?.image || 'assets/default.png'" class="imgFull" />
+  </div>
+
+  <div class="player-main">
+    <div class="disc-wrapper">
+      <img (dblclick)="toggleSongList()" [src]="currentSong?.image || 'assets/default.png'" class="disc" />
+    </div>
+
+    <div class="progress-container">
+      <span>{{ formatTime(currentTime) }}</span>
+      <ion-range min="0" [max]="duration" [(ngModel)]="currentTime" (ionChange)="seekTo($event)"></ion-range>
+      <span>{{ formatTime(duration) }}</span>
+    </div>
+
+    <div class="song-info">
+      <h2>{{ currentSong?.title }}</h2>
+      <p>{{ currentSong?.artist }}</p>
+    </div>
+
+    <div class="controls">
+      <ion-button fill="clear" (click)="prevSong()"><i class="fa fa-step-backward"></i></ion-button>
+      <ion-button fill="solid" shape="round" class="play-btn" (click)="togglePause()" [disabled]="isLoading">
+        <ng-container *ngIf="isLoading; else playIcon">
+          <ion-spinner name="crescent"></ion-spinner>
+        </ng-container>
+        <ng-template #playIcon>
+          <i class="fa" [ngClass]="{'fa-pause': isPlaying, 'fa-play': !isPlaying}"></i>
+        </ng-template>
+      </ion-button>
+      <ion-button fill="clear" (click)="nextSong()"><i class="fa fa-step-forward"></i></ion-button>
+    </div>
+  </div>
+
+  <div class="song-list-overlay" *ngIf="showSongList">
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>All Songs ({{ songs.length }})</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="toggleSongList()"><i class="fa fa-times"></i></ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+
+    <ion-content>
+      <ion-list>
+        <ion-item *ngFor="let song of songs; let i = index" (click)="selectFromList(i)">
+          <div class="list">
+            <p>{{ i + 1 }}.</p>
+            <img class="insideList" [src]="song?.image" alt="Image" />
+            <p>{{ song.title }}</p><br />
+            <p>{{ song.artist }}</p>
+          </div>
+        </ion-item>
+      </ion-list>
+    </ion-content>
+  </div>
+
+</ion-content>

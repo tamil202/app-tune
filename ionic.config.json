@@ -1,0 +1,7 @@
+{
+  "name": "PI TUNE",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
