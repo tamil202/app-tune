@@ -1,6 +1,9 @@
 import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { IonContent, IonHeader, IonToolbar, IonTitle, IonList, IonItem, IonButton, IonRange, IonButtons, IonSpinner } from '@ionic/angular/standalone';
+import {
+  IonContent, IonButton, IonRange, IonHeader, IonTitle,
+  IonToolbar, IonList, IonItem, IonSpinner, IonButtons
+} from '@ionic/angular/standalone';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -18,36 +21,34 @@ interface Song {
   templateUrl: './home.page.html',
   styleUrls: ['home.page.scss'],
   imports: [
-    IonContent,
-    IonButton,
-    IonRange,
-    CommonModule,
-    FormsModule,
-    IonSpinner,
-    IonHeader,
-    IonTitle,
-    IonButtons,
-    IonToolbar,
-    IonList,
-    IonItem
+    IonContent, IonButton, IonRange, CommonModule,
+    FormsModule, IonSpinner, IonHeader, IonTitle,
+    IonToolbar, IonList, IonItem, IonButtons
   ],
 })
 export class HomePage implements OnInit {
-  @ViewChild('visualizerCanvas', { static: false }) visualizerCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('visualizerCanvas', { static: false })
+  visualizerCanvas!: ElementRef<HTMLCanvasElement>;
 
   songs: Song[] = [];
   currentIndex = -1;
-  currentAudio: HTMLAudioElement | any = null;
-  audioCtx: AudioContext | null = null;
-  sourceNode: MediaElementAudioSourceNode | null = null;
+  currentAudio: HTMLAudioElement | null = null;
+  nextAudio: HTMLAudioElement | null = null;
+
+  audioCtx: AudioContext | any = null;
+  sourceNode: MediaElementAudioSourceNode | any = null;
   analyser!: AnalyserNode;
   dataArray!: Uint8Array;
+  ctx!: CanvasRenderingContext2D;
+
   isPlaying = false;
+  isLoading = false;
   duration = 0;
   currentTime = 0;
+  bufferPercent = 0;
   showSongList = false;
-  isLoading = false;
-  ctx!: CanvasRenderingContext2D;
+
+  isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   constructor(private http: HttpClient) { }
 
@@ -58,58 +59,116 @@ export class HomePage implements OnInit {
   fetchSongs() {
     this.isLoading = true;
     this.http.get<Song[]>('https://pi.cerberus-acrux.ts.net/s2/list/songs')
-      .subscribe(data => {
-        this.songs = data;
-        this.loadLastPlayed();
-        this.isLoading = false;
+      .subscribe({
+        next: (data) => {
+          this.songs = data;
+          console.log('Songs loaded:', this.songs.length);
+          if (!this.songs.length) {
+            console.warn('No songs found.');
+            localStorage.removeItem('lastIndex');
+            localStorage.removeItem('lastTime');
+          } else {
+            this.loadLastPlayed();
+          }
+          this.isLoading = false;
+        },
+        error: (err) => {
+          console.error('Failed to fetch songs:', err);
+          this.isLoading = false;
+        }
       });
   }
 
   loadLastPlayed() {
-    const lastIndex = localStorage.getItem('lastIndex');
-    const lastTime = localStorage.getItem('lastTime');
+    const lastIndex = +localStorage.getItem('lastIndex')!;
+    const lastTime = +localStorage.getItem('lastTime')!;
 
-    if (lastIndex) this.currentIndex = +lastIndex;
-
-    if (this.currentIndex >= 0) {
-      this.playSong(this.currentIndex, false);
-      if (lastTime && this.currentAudio) {
-        this.currentAudio.currentTime = +lastTime;
-      }
+    if (Number.isFinite(lastIndex) && lastIndex >= 0 && lastIndex < this.songs.length) {
+      this.currentIndex = lastIndex;
+    } else {
+      this.currentIndex = 0; // fallback to first
     }
+    this.playSong(this.currentIndex, false).then(() => {
+      if (this.currentAudio && Number.isFinite(lastTime)) {
+        this.currentAudio.currentTime = lastTime;
+      }
+    });
+
   }
 
   saveLastPlayed() {
-    localStorage.setItem('lastIndex', this.currentIndex.toString());
+    if (this.currentIndex >= 0) {
+      localStorage.setItem('lastIndex', this.currentIndex.toString());
+    }
   }
 
   async playSong(index: number, autoPlay = true) {
+    if (!this.songs.length) {
+      console.warn('No songs loaded yet.');
+      return;
+    }
+
+    if (index < 0 || index >= this.songs.length) {
+      console.warn('Invalid index:', index);
+      return;
+    }
+
+    const song = this.songs[index];
+    if (!song) {
+      console.error('Song is undefined for index', index);
+      return;
+    }
+
+    console.log(`Playing song: ${song.title}`);
+
+    this.duration = 0;
+    this.currentTime = 0;
     this.currentIndex = index;
     this.saveLastPlayed();
 
     if (this.currentAudio) {
       this.currentAudio.pause();
+      this.currentAudio.src = '';
+      this.currentAudio.load();
       this.currentAudio = null;
     }
 
-    const song = this.songs[this.currentIndex];
-    this.currentAudio = new Audio(song.url);
-    this.currentAudio.crossOrigin = "anonymous"; // 🔥 required for CORS!
+    if (this.nextAudio) {
+      this.nextAudio.pause();
+      this.nextAudio.src = '';
+      this.nextAudio.load();
+      this.nextAudio = null;
+    }
 
-    this.setMediaSession(song);
+    this.currentAudio = new Audio(song.url);
+    this.currentAudio.crossOrigin = 'anonymous';
+    this.currentAudio.setAttribute('playsinline', 'true');
+
     this.isLoading = true;
+    this.setMediaSession(song);
 
     this.currentAudio.addEventListener('loadedmetadata', () => {
-      this.duration = this.currentAudio!.duration;
+      this.duration = this.currentAudio!.duration || 0;
     });
 
-    this.currentAudio.addEventListener('canplay', () => {
+    this.currentAudio.addEventListener('canplaythrough', () => {
       this.isLoading = false;
+    });
+
+    this.currentAudio.addEventListener('progress', () => {
+      const buffered = this.currentAudio!.buffered;
+      if (buffered.length) {
+        const loaded = buffered.end(buffered.length - 1);
+        this.bufferPercent = (loaded / this.duration) * 100;
+      }
     });
 
     this.currentAudio.addEventListener('timeupdate', () => {
       this.currentTime = this.currentAudio!.currentTime;
       localStorage.setItem('lastTime', this.currentTime.toString());
+      if (this.duration - this.currentTime <= 30 && !this.nextAudio) {
+        this.preloadNext();
+      }
     });
 
     this.currentAudio.onended = () => this.nextSong();
@@ -118,30 +177,38 @@ export class HomePage implements OnInit {
       try {
         await this.currentAudio.play();
         this.isPlaying = true;
-        this.isLoading = false;
         this.setupVisualizer();
       } catch (err) {
         console.error('Playback failed:', err);
+        this.isPlaying = false;
       }
     } else {
       this.isPlaying = false;
-      this.isLoading = false;
     }
+  }
+
+  preloadNext() {
+    if (!this.songs.length) return;
+
+    const nextIndex = (this.currentIndex + 1) % this.songs.length;
+    const nextSong = this.songs[nextIndex];
+    if (!nextSong) return;
+
+    this.nextAudio = new Audio(nextSong.url);
+    this.nextAudio.crossOrigin = 'anonymous';
+    this.nextAudio.preload = 'auto';
+    this.nextAudio.setAttribute('playsinline', 'true');
   }
 
   async togglePause() {
     if (!this.currentAudio) return;
-
     if (this.isPlaying) {
       this.currentAudio.pause();
       this.isPlaying = false;
     } else {
-      this.isLoading = true;
-
       try {
         await this.currentAudio.play();
         this.isPlaying = true;
-        this.isLoading = false;
         this.setupVisualizer();
       } catch (err) {
         console.error('Playback failed:', err);
@@ -149,27 +216,106 @@ export class HomePage implements OnInit {
     }
   }
 
-  nextSong() {
-    if (this.songs.length === 0) return;
-    this.currentIndex = (this.currentIndex + 1) % this.songs.length;
-    this.playSong(this.currentIndex);
-    this.setupVisualizer();
+  async nextSong() {
+    if (!this.songs.length) {
+      console.warn('No songs for next.');
+      return;
+    }
+
+    const nextIndex = (this.currentIndex + 1) % this.songs.length;
+
+    if (this.nextAudio) {
+      if (this.currentAudio) {
+        this.currentAudio.pause();
+        this.currentAudio.src = '';
+        this.currentAudio.load();
+      }
+
+      this.currentAudio = this.nextAudio;
+      this.nextAudio = null;
+
+      const song = this.songs[nextIndex];
+      if (song) this.setMediaSession(song);
+
+      try {
+        await this.currentAudio.play();
+        this.isPlaying = true;
+        this.setupVisualizer();
+        this.currentIndex = nextIndex;
+      } catch (err) {
+        console.error('Next song failed:', err);
+      }
+    } else {
+      this.playSong(nextIndex);
+    }
   }
 
   prevSong() {
-    if (this.songs.length === 0) return;
-    this.currentIndex = (this.currentIndex - 1 + this.songs.length) % this.songs.length;
-    this.playSong(this.currentIndex);
-    this.setupVisualizer();
-
+    if (!this.songs.length) {
+      console.warn('No songs for prev.');
+      return;
+    }
+    const prevIndex = (this.currentIndex - 1 + this.songs.length) % this.songs.length;
+    this.playSong(prevIndex);
   }
 
-  seekTo(e: any) {
-    if (this.currentAudio) this.currentAudio.currentTime = e.detail.value;
+  setMediaSession(song: Song) {
+    if ('mediaSession' in navigator && song) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: song.title,
+        artist: song.artist,
+        artwork: [{ src: song.image }],
+      });
+      navigator.mediaSession.setActionHandler('play', () => this.togglePause());
+      navigator.mediaSession.setActionHandler('pause', () => this.togglePause());
+      navigator.mediaSession.setActionHandler('nexttrack', () => this.nextSong());
+      navigator.mediaSession.setActionHandler('previoustrack', () => this.prevSong());
+    }
   }
 
-  toggleSongList() {
-    this.showSongList = !this.showSongList;
+  get currentSong(): Song | null {
+    return (this.currentIndex >= 0 && this.currentIndex < this.songs.length)
+      ? this.songs[this.currentIndex]
+      : null;
+  }
+
+  setupVisualizer() {
+    if (!this.visualizerCanvas) return;
+    if (this.isMobile) {
+      console.log('Visualizer disabled on mobile');
+      return;
+    }
+
+    if (!this.audioCtx) this.audioCtx = new AudioContext();
+    this.audioCtx.resume().then(() => {
+      if (this.sourceNode) this.sourceNode.disconnect();
+      this.sourceNode = this.audioCtx!.createMediaElementSource(this.currentAudio!);
+      this.analyser = this.audioCtx.createAnalyser();
+      this.sourceNode.connect(this.analyser);
+      this.analyser.connect(this.audioCtx.destination);
+      this.analyser.fftSize = 128;
+      this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+
+      const canvas = this.visualizerCanvas.nativeElement;
+      this.ctx = canvas.getContext('2d')!;
+
+      const draw = () => {
+        this.analyser.getByteFrequencyData(this.dataArray);
+        const width = canvas.width = canvas.clientWidth;
+        const height = canvas.height = canvas.clientHeight;
+        this.ctx.clearRect(0, 0, width, height);
+        const barWidth = (width / this.dataArray.length) * 2.5;
+        let x = 0;
+        for (let i = 0; i < this.dataArray.length; i++) {
+          const barHeight = this.dataArray[i] / 2;
+          this.ctx.fillStyle = `rgba(255,255,255,${barHeight / 255})`;
+          this.ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+          x += barWidth + 1;
+        }
+        requestAnimationFrame(draw);
+      };
+      draw();
+    });
   }
 
   selectFromList(index: number) {
@@ -183,72 +329,13 @@ export class HomePage implements OnInit {
     return `${m}:${s}`;
   }
 
-  setMediaSession(song: Song) {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: song.title,
-        artist: song.artist,
-        artwork: [{ src: song.image, sizes: '512x512', type: 'image/jpeg' }]
-      });
-      navigator.mediaSession.setActionHandler('play', () => this.togglePause());
-      navigator.mediaSession.setActionHandler('pause', () => this.togglePause());
-      navigator.mediaSession.setActionHandler('nexttrack', () => this.nextSong());
-      navigator.mediaSession.setActionHandler('previoustrack', () => this.prevSong());
+  seekTo(e: any) {
+    if (this.currentAudio) {
+      this.currentAudio.currentTime = e.detail.value;
     }
   }
 
-  get currentSong(): Song | null {
-    return this.currentIndex >= 0 ? this.songs[this.currentIndex] : null;
+  toggleSongList() {
+    this.showSongList = !this.showSongList;
   }
-
- setupVisualizer() {
-  if (!this.visualizerCanvas || !this.currentAudio) return;
-
-  if (!this.audioCtx) {
-    this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  }
-
-  this.audioCtx.resume().then(() => {
-    // ⚡ Destroy old sourceNode if it exists
-    if (this.sourceNode) {
-      this.sourceNode.disconnect();
-    }
-
-    // ⚡ Create a new sourceNode for the current Audio element
-    this.sourceNode = this.audioCtx!.createMediaElementSource(this.currentAudio);
-    this.analyser = this.audioCtx!.createAnalyser();
-
-    this.sourceNode.connect(this.analyser);
-    this.analyser.connect(this.audioCtx!.destination);
-
-    this.analyser.fftSize = 256;
-    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-
-    const canvas = this.visualizerCanvas.nativeElement;
-    this.ctx = canvas.getContext('2d')!;
-
-    const draw = () => {
-      requestAnimationFrame(draw);
-
-      this.analyser.getByteFrequencyData(this.dataArray);
-
-      const width = canvas.width = canvas.clientWidth;
-      const height = canvas.height = canvas.clientHeight;
-      this.ctx.clearRect(0, 0, width, height);
-
-      const barWidth = (width / this.dataArray.length) * 2.5;
-      let x = 0;
-
-      for (let i = 0; i < this.dataArray.length; i++) {
-        const barHeight = this.dataArray[i] / 2;
-        this.ctx.fillStyle = `rgba(255, 255, 255, ${barHeight / 255})`;
-        this.ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
-      }
-    };
-
-    draw();
-  });
-}
-
 }
