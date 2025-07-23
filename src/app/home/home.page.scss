@@ -157,6 +157,7 @@ ion-header {
 /* Mobile hide background image */
 @media screen and (max-width: 768px) {
   .imgFull {
-    display: none;
+    background-size: cover;
+    opacity: 1;
   }
 }

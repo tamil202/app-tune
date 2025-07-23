@@ -93,7 +93,6 @@ export class HomePage implements OnInit {
         this.currentAudio.currentTime = lastTime;
       }
     });
-
   }
 
   saveLastPlayed() {
@@ -119,10 +118,6 @@ export class HomePage implements OnInit {
       return;
     }
 
-    console.log(`Playing song: ${song.title}`);
-
-    this.duration = 0;
-    this.currentTime = 0;
     this.currentIndex = index;
     this.saveLastPlayed();
 
@@ -131,13 +126,6 @@ export class HomePage implements OnInit {
       this.currentAudio.src = '';
       this.currentAudio.load();
       this.currentAudio = null;
-    }
-
-    if (this.nextAudio) {
-      this.nextAudio.pause();
-      this.nextAudio.src = '';
-      this.nextAudio.load();
-      this.nextAudio = null;
     }
 
     this.currentAudio = new Audio(song.url);
@@ -223,31 +211,7 @@ export class HomePage implements OnInit {
     }
 
     const nextIndex = (this.currentIndex + 1) % this.songs.length;
-
-    if (this.nextAudio) {
-      if (this.currentAudio) {
-        this.currentAudio.pause();
-        this.currentAudio.src = '';
-        this.currentAudio.load();
-      }
-
-      this.currentAudio = this.nextAudio;
-      this.nextAudio = null;
-
-      const song = this.songs[nextIndex];
-      if (song) this.setMediaSession(song);
-
-      try {
-        await this.currentAudio.play();
-        this.isPlaying = true;
-        this.setupVisualizer();
-        this.currentIndex = nextIndex;
-      } catch (err) {
-        console.error('Next song failed:', err);
-      }
-    } else {
-      this.playSong(nextIndex);
-    }
+    await this.playSong(nextIndex);
   }
 
   prevSong() {
@@ -281,11 +245,6 @@ export class HomePage implements OnInit {
 
   setupVisualizer() {
     if (!this.visualizerCanvas) return;
-    if (this.isMobile) {
-      console.log('Visualizer disabled on mobile');
-      return;
-    }
-
     if (!this.audioCtx) this.audioCtx = new AudioContext();
     this.audioCtx.resume().then(() => {
       if (this.sourceNode) this.sourceNode.disconnect();
